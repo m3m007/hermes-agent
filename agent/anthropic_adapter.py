@@ -186,7 +186,16 @@ def _accepts_thinking_disable(model: str) -> bool:
     thinks by default, so "off" only works if the disable is sent; mandatory-thinking families
     400 on it and keep the omit behavior. Legacy manual-thinking models are opt-in via
     budget_tokens, so omission is already off. Scoped to Claude: Kimi's documented disable is
-    omission, and sending it a new parameter on the strength of Claude's contract is a guess."""
+    omission, and sending it a new parameter on the strength of Claude's contract is a guess.
+
+    [TOKEN-PLAN PATCH 2026-10-04, reapply after `hermes update`]: the same disable is VERIFIED
+    accepted on Alibaba Token Plan /apps/anthropic for qwen3.8-flash, qwen3.8-max, glm-5.2,
+    deepseek-v4.1-flash, deepseek-v4-pro (measured: same reply 59 -> 2 output tokens), and
+    VERIFIED rejected by glm-5.3 ("enable_thinking ... restricted to True") — so the allowlist
+    below is measured, not guessed. dots/dashes normalized."""
+    m = model.lower().replace("-", ".")
+    if any(p in m for p in ("qwen3.8.", "qwen3.6.", "deepseek.v4", "glm.5.2")):
+        return True
     return (
         _is_claude_model(model)
         and _supports_adaptive_thinking(model)
