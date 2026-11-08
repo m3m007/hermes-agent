@@ -167,3 +167,6 @@ Every former god file is a **facade** (public entry points + the names other pac
 
 Long-form background: `website/docs/developer-guide/`. Workflow rules (PR/issue/review/salvage
 process) live in the `hermes-agent-dev` skill, not here.
+
+# AI-DLC lifecycle harness (installed under .aidlc/; see .aidlc/skills/aidlc/SKILL.md).
+# When a request starts with "Using AI-DLC", read .aidlc/skills/aidlc/SKILL.md and follow it.
