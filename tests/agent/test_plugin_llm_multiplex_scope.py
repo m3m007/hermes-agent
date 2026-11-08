@@ -247,7 +247,7 @@ def test_concurrent_async_calls_do_not_interleave_scopes(tmp_path, monkeypatch, 
     home; one task's reset never clears another's (both bindings are ContextVar-backed)."""
     home_a = _write_profile(tmp_path / "profile-a", base_url="https://a.example/v1")
     home_b = _write_profile(tmp_path / "profile-b", base_url="https://b.example/v1")
-    seen: dict = {}
+    seen: list = []
 
     async def probe(**call_kwargs):
         from agent.secret_scope import get_secret_str
@@ -255,9 +255,9 @@ def test_concurrent_async_calls_do_not_interleave_scopes(tmp_path, monkeypatch, 
 
         # Yield so the other task runs while this one holds its scope.
         await asyncio.sleep(0)
-        seen[call_kwargs.get("model") or "x"] = (
+        seen.append((
             get_secret_str("OPENROUTER_BASE_URL"), str(get_hermes_home()), current_secret_scope_home(),
-        )
+        ))
         return _fake_response()
 
     monkeypatch.setattr("agent.auxiliary_client.async_call_llm", probe)
@@ -265,6 +265,9 @@ def test_concurrent_async_calls_do_not_interleave_scopes(tmp_path, monkeypatch, 
     llm_b = _make_llm(home_b)
 
     async def _run():
+        # A list, not a dict keyed by model: the trust policy forbids model
+        # overrides, and keying both calls under one key lets the second
+        # overwrite the first.
         return await asyncio.gather(
             llm_a.acomplete([{"role": "user", "content": "a"}]),
             llm_b.acomplete([{"role": "user", "content": "b"}]),
@@ -272,9 +275,10 @@ def test_concurrent_async_calls_do_not_interleave_scopes(tmp_path, monkeypatch, 
 
     asyncio.run(_run())
 
-    assert seen["x"][0] in {"https://a.example/v1", "https://b.example/v1"}
-    assert {Path(v[1]).resolve() for v in seen.values()} == {home_a.resolve(), home_b.resolve()}
-    assert {Path(v[2]).resolve() for v in seen.values()} == {home_a.resolve(), home_b.resolve()}
+    assert len(seen) == 2
+    assert {v[0] for v in seen} == {"https://a.example/v1", "https://b.example/v1"}
+    assert {Path(v[1]).resolve() for v in seen} == {home_a.resolve(), home_b.resolve()}
+    assert {Path(v[2]).resolve() for v in seen} == {home_a.resolve(), home_b.resolve()}
     assert current_secret_scope() is None
 
 

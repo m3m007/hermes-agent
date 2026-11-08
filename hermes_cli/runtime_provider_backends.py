@@ -11,7 +11,7 @@ import re
 from typing import Any, Dict, Optional
 
 from agent.azure_identity_adapter import is_token_provider
-from agent.secret_scope import get_secret_str
+from agent.secret_scope import current_secret_scope, get_secret_str, is_multiplex_active
 from hermes_constants import OPENROUTER_BASE_URL
 from utils import base_url_host_matches, base_url_hostname, base_url_origin
 
@@ -144,11 +144,24 @@ def _resolve_openrouter_runtime(
     # config.yaml already answered (#132887). Reading them lazily, in precedence order, keeps the
     # documented order (explicit > CUSTOM_BASE_URL > model.base_url > OPENROUTER_BASE_URL > default)
     # while letting the config rung short-circuit the credential reads.
+    #
+    # ``use_config_base_url`` is the trust verdict, not the precedence verdict: it answers "may
+    # model.base_url back this route", never "does it win". The env rungs are credential reads, and
+    # under multiplexing an unscoped read fails closed with ``UnscopedSecretError`` — so they are
+    # read when a scope is installed (the documented precedence then applies in full, and a scoped
+    # CUSTOM_BASE_URL beats model.base_url) or when the config rung did not answer at all (an
+    # endpoint nobody declared must still fail closed). An unscoped caller whose endpoint the config
+    # already answers reads no credential at all (#132887).
     config_base_url = cfg_base_url.strip() if use_config_base_url else ""
-    env_custom_base_url = "" if config_base_url else get_secret_str("CUSTOM_BASE_URL", "").strip()
-    env_openrouter_base_url = (
-        "" if (config_base_url or env_custom_base_url) else get_secret_str("OPENROUTER_BASE_URL", "").strip()
-    )
+    scope_ok = current_secret_scope() is not None or not is_multiplex_active()
+    if scope_ok or not config_base_url:
+        env_custom_base_url = get_secret_str("CUSTOM_BASE_URL", "").strip()
+        env_openrouter_base_url = (
+            "" if (env_custom_base_url or config_base_url) else get_secret_str("OPENROUTER_BASE_URL", "").strip()
+        )
+    else:
+        env_custom_base_url = ""
+        env_openrouter_base_url = ""
     base_url = ((explicit_base_url or "").strip() or env_custom_base_url or config_base_url
                 or env_openrouter_base_url or OPENROUTER_BASE_URL).rstrip("/")
     # Choose API key based on whether the resolved base_url targets OpenRouter. When hitting OpenRouter,

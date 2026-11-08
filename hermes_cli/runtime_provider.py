@@ -443,7 +443,18 @@ def _host_gated_env_key_candidates(base_url: str, *, ollama: bool) -> list:
     """Env API keys gated on their authoritative hosts, then the host-derived ``<VENDOR>_API_KEY``.
     Sending OPENAI/OPENROUTER/OLLAMA keys to an unrelated endpoint leaks credentials
     (GHSA-76xc-57q6-vm5m); match on HOST, not substring. ``_host_derived_api_key`` skips OLLAMA, so
-    callers that want it opt in via ``ollama``."""
+    callers that want it opt in via ``ollama``.
+
+    An unscoped caller under multiplexing gets no candidates at all: every rung is a
+    ``get_secret_str`` read, and an unscoped read fails closed with ``UnscopedSecretError`` even
+    when the endpoint was already answered by config, a ``providers:`` entry or an explicit
+    override (#132887). Such a caller reaches here only after base_url resolution succeeded, so the
+    endpoint is answered and the credential pool (or the config key) carries auth; degrading to no
+    env candidates beats crashing the boot path. Scoped callers and single-profile deployments keep
+    the original host-gating semantics byte-for-byte."""
+    from agent.secret_scope import current_secret_scope, is_multiplex_active
+    if is_multiplex_active() and current_secret_scope() is None:
+        return []
     is_openai = base_url_host_matches(base_url, "openai.com") or base_url_host_matches(base_url, "openai.azure.com")
     # OPENAI_BASE_URL names the proxy/gateway the OPENAI_API_KEY was issued for (the ``openai`` alias
     # expands onto it); an exact match is the user's own pairing, not a leak to an unrelated host.
