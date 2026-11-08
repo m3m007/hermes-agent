@@ -131,15 +131,25 @@ def _resolve_openrouter_runtime(
     # Aliases resolving to "custom" (ollama, vllm, …) follow bare-custom trust + routing rules.
     if requested_norm and requested_norm != "custom" and rp._resolves_to_custom(requested_norm):
         requested_norm = "custom"
-    env_openrouter_base_url = get_secret_str("OPENROUTER_BASE_URL", "").strip()
-    env_custom_base_url = get_secret_str("CUSTOM_BASE_URL", "").strip()
     use_config_base_url = bool(cfg_base_url.strip()) and not explicit_base_url and (
         (requested_norm == "auto" and cfg_provider in ("", "auto"))
         or (requested_norm == "custom" and rp._config_base_url_trustworthy_for_bare_custom(cfg_base_url, cfg_provider))
         # provider: openrouter + base_url in config.yaml is a deliberate mirror/proxy (#10622).
         or (requested_norm == "openrouter" and cfg_provider == "openrouter")
     )
-    base_url = ((explicit_base_url or "").strip() or env_custom_base_url or (cfg_base_url.strip() if use_config_base_url else "")
+    # The trusted ``model.base_url`` rung is resolved BEFORE any credential read. Both env rungs go
+    # through ``get_secret_str``, which fails closed with ``UnscopedSecretError`` under multiplexing
+    # when no profile scope is installed — so an unscoped auxiliary caller on a profile that has no
+    # OpenRouter at all (main model is a custom provider) used to crash on the FIRST read even though
+    # config.yaml already answered (#132887). Reading them lazily, in precedence order, keeps the
+    # documented order (explicit > CUSTOM_BASE_URL > model.base_url > OPENROUTER_BASE_URL > default)
+    # while letting the config rung short-circuit the credential reads.
+    config_base_url = cfg_base_url.strip() if use_config_base_url else ""
+    env_custom_base_url = "" if config_base_url else get_secret_str("CUSTOM_BASE_URL", "").strip()
+    env_openrouter_base_url = (
+        "" if (config_base_url or env_custom_base_url) else get_secret_str("OPENROUTER_BASE_URL", "").strip()
+    )
+    base_url = ((explicit_base_url or "").strip() or env_custom_base_url or config_base_url
                 or env_openrouter_base_url or OPENROUTER_BASE_URL).rstrip("/")
     # Choose API key based on whether the resolved base_url targets OpenRouter. When hitting OpenRouter,
     # prefer OPENROUTER_API_KEY (issue #289). When hitting a custom endpoint (e.g. Z.ai, local LLM), prefer
